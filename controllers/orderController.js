@@ -1,199 +1,162 @@
-import Product from '../models/productModel.js';
 import asyncHandler from '../middleware/asyncHandler.js';
-import cloudinary from '../config/cloudinary.js';
+import Order from '../models/orderModel.js';
+import Product from '../models/productModel.js';
+import { calcPrices } from '../utils/calcPrices.js';
 
-// @desc Gets all products
-// @route GET /api/products
-// @privacy Public
-const getProducts = asyncHandler(async (req, res) => {
-  const category = req.query.category;
-  const keyword = req.query.keyword
-    ? {
-        name: {
-          $regex: req.query.keyword,
-          $options: 'i',
-        },
-      }
-    : {};
+// @desc Create new Order
+// @route OOST /api/orders
+// @privacy Private
+const addOrderItems = asyncHandler(async (req, res) => {
+  const { orderItems, shippingAddress, paymentMethod } = req.body;
 
-  let query =
-    category && category !== 'All'
-      ? { ...keyword, category: { $regex: category, $options: 'i' } }
-      : keyword;
-
-  const pageSize = 10;
-  const page = Number(req.query.pageNumber) || 1;
-  const count = await Product.countDocuments(query);
-
-  const products = await Product.find(query)
-    .sort({ createdAt: -1 })
-    .limit(pageSize)
-    .skip(pageSize * (page - 1));
-
-  res.status(200);
-  res.json({ products, page, pages: Math.ceil(count / pageSize) });
-});
-
-// @desc Gets Single Product
-// @route GET /api/products:id
-// @privacy Public
-const getProduct = asyncHandler(async (req, res) => {
-  const product = await Product.findById(req.params.id);
-
-  if (product) {
-    res.status(200);
-    res.json(product);
-  }
-});
-
-// @desc    Create a product
-// @route   POST /api/products
-// @access  Private/Admin
-const createProduct = asyncHandler(async (req, res) => {
-  const product = new Product({
-    name: 'Sample name',
-    price: 0,
-    user: req.user._id,
-    image: {
-      url: '/images/sample.jpg',
-    },
-    brand: 'Sample brand',
-    category: 'Sample category',
-    countInStock: 0,
-    numReviews: 0,
-    description: 'Sample description',
-  });
-
-  const createdProduct = await product.save();
-  res.status(201).json(createdProduct);
-});
-
-// @desc    Update a product
-// @route   PUT /api/products/:id
-// @access  Private/Admin
-const updateProduct = asyncHandler(async (req, res) => {
-  const { name, price, description, image, brand, category, countInStock } =
-    req.body;
-
-  const product = await Product.findById(req.params.id);
-
-  if (product) {
-    if (image) {
-      const existingImageId = product?.image?.publicId || '';
-
-      if (existingImageId) {
-        const newImageId = existingImageId.substring(
-          existingImageId.indexOf('products') + 'products/'.length
-        );
-        const uploadedResponse = await cloudinary.uploader.upload(image, {
-          folder: 'products',
-          public_id: newImageId,
-          transformation: [{ width: 640, height: 510, crop: 'scale' }],
-        });
-        product.image = {
-          url: uploadedResponse.url,
-          publicId: uploadedResponse.public_id,
-        };
-      } else {
-        const uploadedResponse = await cloudinary.uploader.upload(image, {
-          folder: 'products',
-        });
-        product.image = {
-          url: uploadedResponse.url,
-          publicId: uploadedResponse.public_id,
-        };
-      }
-    }
-    product.name = name;
-    product.price = price;
-    product.description = description;
-
-    product.brand = brand;
-    product.category = category;
-    product.countInStock = countInStock;
-
-    const updatedProduct = await product.save();
-    res.json(updatedProduct);
+  if (orderItems && orderItems.length === 0) {
+    res.status(400);
+    throw new Error('No order items');
   } else {
-    res.status(404);
-    throw new Error('Product not found');
-  }
-});
+    // NOTE: here we must assume that the prices from our client are incorrect.
+    // We must only trust the price of the item as it exists in
+    // our DB. This prevents a user paying whatever they want by hacking our client
+    // side code - https://gist.github.com/bushblade/725780e6043eaf59415fbaf6ca7376ff
+    // get the ordered items from our database
 
-// @desc    Delete a product
-// @route   DELETE /api/products/:id
-// @access  Private/Admin
-const deleteProduct = asyncHandler(async (req, res) => {
-  const product = await Product.findById(req.params.id);
+    const itemsFromDB = await Product.find({
+      _id: { $in: orderItems.map((x) => x._id) },
+    });
 
-  if (product) {
-    product.image.publicId &&
-      (await cloudinary.uploader.destroy(product.image.publicId));
-    await Product.deleteOne({ _id: product._id });
-    res.json({ message: 'Product removed' });
-  } else {
-    res.status(404);
-    throw new Error('Product not found');
-  }
-});
+    // map over the order items and use the price from our items from database
+    const dbOrderItems = orderItems.map((itemFromClient) => {
+      const matchingItemFromDB = itemsFromDB.find(
+        (itemFromDB) => itemFromDB._id.toString() === itemFromClient._id
+      );
+      return {
+        ...itemFromClient,
+        product: itemFromClient._id,
+        price: matchingItemFromDB.price,
+        _id: undefined,
+      };
+    });
 
-// @desc    Create new review
-// @route   POST /api/products/:id/reviews
-// @access  Private
-const createProductReview = asyncHandler(async (req, res) => {
-  const { rating, comment } = req.body;
+    // calculate prices
+    const { itemsPrice, taxPrice, shippingPrice, totalPrice } =
+      calcPrices(dbOrderItems);
 
-  const product = await Product.findById(req.params.id);
-
-  if (product) {
-    const alreadyReviewed = product.reviews.find(
-      (r) => r.user.toString() === req.user._id.toString()
-    );
-
-    if (alreadyReviewed) {
-      res.status(400);
-      throw new Error('Product already reviewed');
-    }
-
-    const review = {
-      name: `${req.user.firstName} ${req.user.lastName}`,
-      rating: Number(rating),
-      comment,
+    const order = new Order({
+      orderItems: dbOrderItems,
       user: req.user._id,
+      shippingAddress,
+      paymentMethod,
+      itemsPrice,
+      taxPrice,
+      shippingPrice,
+      totalPrice,
+    });
+
+    const createdOrder = await order.save();
+
+    res.status(201).json(createdOrder);
+  }
+});
+
+// @desc Get logged in users orders
+// @route GET /api/orders/mine
+// @privacy Private
+const getMyOrders = asyncHandler(async (req, res) => {
+  const orders = await Order.find({ user: req.user._id });
+  res.status(200);
+  res.json(orders);
+});
+
+// @desc Get order by ID
+// @route GET /api/orders/:id
+// @privacy Private
+const getOrderById = asyncHandler(async (req, res) => {
+  const order = await Order.findById(req.params.id).populate(
+    'user',
+    'firstName lastName email'
+  );
+
+  if (order) {
+    res.status(200);
+    res.json(order);
+  } else {
+    res.status(404);
+    throw new Error('Order not found');
+  }
+});
+
+// @desc  update order to paid
+// @route PUT /api/orders/:id/pay
+// @privacy Private
+const updateOrderToPaid = asyncHandler(async (req, res) => {
+  // NOTE: here we need to verify the payment was made to PayPal before marking
+  // the order as paid
+  const { verified, value } = await verifyPayPalPayment(req.body.id);
+  if (!verified) throw new Error('Payment not verified');
+
+  // check if this transaction has been used before
+  const isNewTransaction = await checkIfNewTransaction(Order, req.body.id);
+  if (!isNewTransaction) throw new Error('Transaction has been used before');
+
+  const order = await Order.findById(req.params.id);
+
+  if (order) {
+    // check the correct amount was paid
+    const paidCorrectAmount = order.totalPrice.toString() === value;
+    if (!paidCorrectAmount) throw new Error('Incorrect amount paid');
+
+    order.isPaid = true;
+    order.paidAt = Date.now();
+    order.paymentResult = {
+      id: req.body.id,
+      status: req.body.status,
+      update_time: req.body.update_time,
+      email_address: req.body.payer.email_address,
     };
 
-    product.reviews.push(review);
+    const updatedOrder = await order.save();
 
-    product.numReviews = product.reviews.length;
-
-    product.rating =
-      product.reviews.reduce((acc, item) => item.rating + acc, 0) /
-      product.reviews.length;
-
-    await product.save();
-    res.status(201).json({ message: 'Review added' });
+    res.json(updatedOrder);
   } else {
     res.status(404);
-    throw new Error('Product not found');
+    throw new Error('Order not found');
   }
 });
 
-// @desc    Get top rated products
-// @route   GET /api/products/top
-// @access  Public
-const getTopProducts = asyncHandler(async (req, res) => {
-  const products = await Product.find({}).sort({ rating: -1 }).limit(3);
-  res.status(200);
-  res.json(products);
+// @desc  update order to delivered
+// @route PUT /api/orders/:id/deliver
+// @privacy Private/Admin
+const updateOrderToDelivered = asyncHandler(async (req, res) => {
+  const order = await Order.findById(req.params.id);
+
+  if (order) {
+    order.isDelivered = true;
+    order.deliveredAt = Date.now();
+
+    const updatedOrder = await order.save();
+
+    res.json(updatedOrder);
+  } else {
+    res.status(404);
+    throw new Error('Order not found');
+  }
+});
+
+// @desc Get all orders
+// @route GET /api/orders
+// @privacy Private/Admin
+const getOrders = asyncHandler(async (req, res) => {
+  const orders = await Order.find({}).populate(
+    'user',
+    'id firstName lastName email'
+  );
+  res.json(orders);
 });
 
 export {
-  
-  getProducts,
-  getProduct,
-  createProduct,
-  updateProduct,
-  deleteProduct,
-  createProductReview,
-  getTopProducts,
+  addOrderItems,
+  getMyOrders,
+  getOrderById,
+  updateOrderToPaid,
+  updateOrderToDelivered,
+  getOrders,
 };
