@@ -188,6 +188,7 @@ const getTopProducts = asyncHandler(async (req, res) => {
 });
 
 export {
+  
   getProducts,
   getProduct,
   createProduct,
