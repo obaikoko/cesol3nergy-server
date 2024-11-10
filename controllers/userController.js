@@ -203,7 +203,9 @@ const updateUser = asyncHandler(async (req, res) => {
     user.firstName = req.body.firstName || user.firstName;
     user.lastName = req.body.lastName || user.firstName;
     user.email = req.body.email || user.email;
-    user.isAdmin = Boolean(req.body.isAdmin);
+    user.phone = req.body.phone || user.phone;
+    user.address = req.body.address || user.address;
+    // user.isAdmin = Boolean(req.body.isAdmin);
 
     const updatedUser = await user.save();
 
@@ -212,6 +214,8 @@ const updateUser = asyncHandler(async (req, res) => {
       firstName: updatedUser.firstName,
       lastName: updatedUser.lastName,
       email: updatedUser.email,
+      phone: updatedUser.phone,
+      address: updatedUser.address,
       isAdmin: updatedUser.isAdmin,
     });
   } else {
