@@ -104,6 +104,8 @@ const getUserProfile = asyncHandler(async (req, res) => {
       firstName: user.firstName,
       lastName: user.lastName,
       email: user.email,
+      address: user.address,
+      phone: user.phone,
       isAdmin: user.isAdmin,
     });
   }
