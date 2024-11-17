@@ -8,6 +8,7 @@ import { errorHandler, notFound } from './middleware/errorMiddleware.js';
 import userRoute from './routes/userRoutes.js';
 import productRoute from './routes/productRoutes.js';
 import orderRoute from './routes/orderRoutes.js';
+import dataRoute from './routes/dataRoutes.js';
 
 dotenv.config();
 const port = process.env.PORT || 5000;
@@ -28,6 +29,7 @@ app.use(express.json());
 app.use('/api/users', userRoute);
 app.use('/api/products', productRoute);
 app.use('/api/orders', orderRoute);
+app.use('/api/data', dataRoute);
 
 app.use(errorHandler);
 app.use(notFound);
