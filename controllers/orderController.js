@@ -8,7 +8,7 @@ import { calcPrices } from '../utils/calcPrices.js';
 // @privacy Private
 const addOrderItems = asyncHandler(async (req, res) => {
   const { orderItems, shippingAddress, paymentMethod } = req.body;
-  
+
   if (orderItems && orderItems.length === 0) {
     res.status(400);
     throw new Error('No order items');
@@ -18,7 +18,7 @@ const addOrderItems = asyncHandler(async (req, res) => {
     // our DB. This prevents a user paying whatever they want by hacking our client
     // side code - https://gist.github.com/bushblade/725780e6043eaf59415fbaf6ca7376ff
     // get the ordered items from our database
-    
+
     const itemsFromDB = await Product.find({
       _id: { $in: orderItems.map((x) => x._id) },
     });
@@ -52,7 +52,7 @@ const addOrderItems = asyncHandler(async (req, res) => {
       totalPrice,
     });
 
-    // const createdOrder = await order.save();
+    const createdOrder = await order.save();
 
     res.status(201).json(createdOrder);
   }
