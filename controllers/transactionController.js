@@ -1,11 +1,14 @@
 import https from 'https';
 import asyncHandler from '../middleware/asyncHandler.js';
+import Order from '../models/orderModel.js';
 
 const createTransaction = asyncHandler(async (req, res) => {
+  const { email, amount, orderId } = req.body; // Get order details from request
+
   const params = JSON.stringify({
-    email: req.body.email, // Use email from request body
-    amount: req.body.amount * 100, // Convert amount to kobo (Naira x 100)
-    callback_url: process.env.PAYSTACK_CALLBACK_URL,
+    email,
+    amount: amount * 100, // Convert to kobo (Naira x 100)
+    callback_url: `${process.env.PAYSTACK_CALLBACK_URL}/order/${orderId}`,
   });
 
   const options = {
@@ -19,46 +22,80 @@ const createTransaction = asyncHandler(async (req, res) => {
     },
   };
 
-  const paystackReq = https
-    .request(options, (paystackRes) => {
-      let data = '';
+  const paystackReq = https.request(options, (paystackRes) => {
+    let data = '';
 
-      // Collect data chunks
-      paystackRes.on('data', (chunk) => {
-        data += chunk;
-      });
+    paystackRes.on('data', (chunk) => {
+      data += chunk;
+    });
 
-      // Handle response completion
-      paystackRes.on('end', () => {
-        const response = JSON.parse(data);
+    paystackRes.on('end', async () => {
+      const response = JSON.parse(data);
 
-        if (response.status) {
+      if (response.status) {
+        try {
+          // Save reference to the database
+          const order = await Order.findById(orderId);
+          if (!order) {
+            return res
+              .status(404)
+              .json({ success: false, message: 'Order not found' });
+          }
+
+          order.transactionReference = response.data.reference; // Save the reference
+          await order.save();
+
           res.status(200).json({
             success: true,
-            data: response.data,
+            data: {
+              authorization_url: response.data.authorization_url,
+              reference: response.data.reference,
+            },
           });
-        } else {
-          res.status(400).json({
+        } catch (error) {
+          console.error(error);
+          res.status(500).json({
             success: false,
-            message: response.message,
+            message: 'Failed to save transaction reference',
           });
         }
-      });
-    })
-    .on('error', (error) => {
-      console.error(error);
-      res
-        .status(500)
-        .json({ success: false, message: 'Internal server error' });
+      } else {
+        res.status(400).json({
+          success: false,
+          message: response.message,
+        });
+      }
     });
+  });
+
+  paystackReq.on('error', (error) => {
+    console.error(error);
+    res.status(500).json({ success: false, message: 'Internal server error' });
+  });
 
   paystackReq.write(params);
   paystackReq.end();
 });
 
-
 const confirmTransaction = asyncHandler(async (req, res) => {
-  const reference = req.params.reference; // Extract reference from the route parameter
+  const reference = req.query.reference; // Extract reference from query
+
+  if (!reference) {
+    return res.status(400).json({
+      success: false,
+      message: 'Transaction reference is required',
+    });
+  }
+
+  // Fetch the transaction/order from the database
+  const order = await Order.findOne({ transactionReference: reference }); // Adjust field to match your schema
+
+  if (!order) {
+    return res.status(404).json({
+      success: false,
+      message: 'Order not found for this transaction reference',
+    });
+  }
 
   const options = {
     hostname: 'api.paystack.co',
@@ -66,51 +103,57 @@ const confirmTransaction = asyncHandler(async (req, res) => {
     path: `/transaction/verify/${reference}`,
     method: 'GET',
     headers: {
-      Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`, // Use your Paystack secret key
+      Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`, // Your secret key
     },
   };
 
-  https
-    .request(options, (paystackRes) => {
-      let data = '';
+  const paystackReq = https.request(options, (paystackRes) => {
+    let data = '';
 
-      paystackRes.on('data', (chunk) => {
-        data += chunk;
-      });
+    paystackRes.on('data', (chunk) => {
+      data += chunk;
+    });
 
-      paystackRes.on('end', () => {
-        const response = JSON.parse(data);
+    paystackRes.on('end', async () => {
+      const response = JSON.parse(data);
 
-        if (response.status && response.data.status === 'success') {
-          // Validate the amount paid
-          if (response.data.amount === req.body.amount * 100) {
-            res.status(200).json({
-              success: true,
-              message: 'Payment verified successfully',
-              data: response.data,
-            });
-          } else {
-            res.status(400).json({
-              success: false,
-              message: 'Payment amount mismatch',
-            });
-          }
+      if (response.status && response.data.status === 'success') {
+        // Validate the amount from Paystack matches the database value
+        if (response.data.amount === order.totalPrice * 100) {
+          // Update order status to reflect successful payment
+          order.isPaid = true;
+          order.paidAt = new Date();
+          await order.save();
+
+          res.status(200).json({
+            success: true,
+            message: 'Payment verified successfully',
+            data: response.data,
+          });
         } else {
           res.status(400).json({
             success: false,
-            message: response.message || 'Verification failed',
+            message: 'Payment amount mismatch',
           });
         }
-      });
-    })
-    .on('error', (error) => {
-      console.error(error);
-      res.status(500).json({
-        success: false,
-        message: 'Internal server error',
-      });
-    })
-    .end();
+      } else {
+        res.status(400).json({
+          success: false,
+          message: response.message || 'Payment verification failed',
+        });
+      }
+    });
+  });
+
+  paystackReq.on('error', (error) => {
+    console.error(error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+    });
+  });
+
+  paystackReq.end();
 });
 
 export { createTransaction, confirmTransaction };
