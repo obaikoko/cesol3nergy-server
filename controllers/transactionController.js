@@ -78,7 +78,9 @@ const createTransaction = asyncHandler(async (req, res) => {
 });
 
 const confirmTransaction = asyncHandler(async (req, res) => {
-  const reference = req.query.reference; // Extract reference from query
+  const { data } = req.body;
+
+  const reference = data.reference;
 
   if (!reference) {
     return res.status(400).json({

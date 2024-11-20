@@ -6,6 +6,6 @@ import {
 const router = express.Router();
 
 router.route('/initialize').post(createTransaction);
-router.route('/verify/:reference').get(confirmTransaction);
+router.route('/verify').post(confirmTransaction);
 
 export default router;
