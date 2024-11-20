@@ -1,6 +1,7 @@
 import https from 'https';
 import asyncHandler from '../middleware/asyncHandler.js';
 import Order from '../models/orderModel.js';
+import crypto from 'crypto';
 
 const createTransaction = asyncHandler(async (req, res) => {
   const { email, amount, orderId } = req.body; // Get order details from request
@@ -79,8 +80,20 @@ const createTransaction = asyncHandler(async (req, res) => {
 
 const confirmTransaction = asyncHandler(async (req, res) => {
   const { data } = req.body;
-
   const reference = data.reference;
+  const verifyPaystackWebhook = (req) => {
+    const secret = process.env.PAYSTACK_SECRET_KEY;
+    const hash = crypto
+      .createHmac('sha512', secret)
+      .update(JSON.stringify(req.body))
+      .digest('hex');
+    return hash === req.headers['x-paystack-signature'];
+  };
+  if (!verifyPaystackWebhook(req)) {
+    return res
+      .status(400)
+      .json({ success: false, message: 'Invalid webhook signature' });
+  }
 
   if (!reference) {
     return res.status(400).json({
