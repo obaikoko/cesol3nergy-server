@@ -17,8 +17,8 @@ const port = process.env.PORT || 5000;
 connectDB();
 const app = express();
 const corsOptions = {
-  origin: 'http://localhost:3000',
-  // origin: 'https://cesol3nergy.vercel.app',
+  // origin: 'http://localhost:3000',
+  origin: 'https://cesol3nergy.vercel.app',
   credentials: true,
 };
 
