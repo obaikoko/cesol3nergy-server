@@ -1,6 +1,7 @@
 import express from 'express';
 import { protect, admin } from '../middleware/authMiddleware.js';
 import {
+  verifyEmail,
   authUser,
   registerUser,
   logoutUser,
@@ -18,7 +19,9 @@ import { userRateLimit } from '../middleware/rateLimiter.js';
 
 const router = express.Router();
 
-router.route('/').post(registerUser).get(protect, admin, getUsers);
+router.route('/').get(protect, admin, getUsers);
+router.route('/verify-email').post(verifyEmail);
+router.route('/create/:token').put(registerUser);
 router.route('/delete-account').delete(protect, deleteAccount);
 router
   .route('/profile')
@@ -31,9 +34,9 @@ router.post('/auth', authUser);
 router.post('/auth', authUser);
 router.post('/logout', logoutUser);
 router
-.route('/:id')
-.get(protect, admin, getUserById)
-.put(protect, admin, updateUser)
-.delete(protect, admin, deleteUser);
+  .route('/:id')
+  .get(protect, admin, getUserById)
+  .put(protect, admin, updateUser)
+  .delete(protect, admin, deleteUser);
 
 export default router;

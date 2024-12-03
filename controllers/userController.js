@@ -39,46 +39,98 @@ const authUser = asyncHandler(async (req, res) => {
   }
 });
 
-// @description Register users
+// @description Verify Email
 // @Route POST /api/users/
 // privacy Public
+
+const verifyEmail = asyncHandler(async (req, res) => {
+  const { email } = req.body;
+  const verificationToken = crypto.randomBytes(32).toString('hex');
+  if (!email) {
+    res.status(400);
+    throw new Error('Please add a valid email address');
+  }
+
+  // Check if the user already exists
+  const existingUser = await User.findOne({ email, isVerified: true });
+  const unverifiedUser = await User.findOne({ email, isVerified: false });
+  if (existingUser) {
+    res.status(400);
+    throw new Error('User with this email already exists.');
+  }
+  if (unverifiedUser) {
+    unverifiedUser.verificationToken = verificationToken;
+    await unverifiedUser.save();
+
+    const verificationUrl = `${process.env.PUBLIC_DOMAIN}/register/?token=${verificationToken}`;
+
+    sendSingleMail({
+      email,
+      subject: 'Email Verification',
+      text: `Please use the link below to complete your account creation: ${verificationUrl}`,
+    });
+    res.status(400);
+    throw new Error(
+      'Account creation already in progress, follow the link in your email to complete the account creation.'
+    );
+  }
+
+  // Save the user temporarily with verification token
+  const newUser = await User.create({
+    email,
+    verificationToken,
+    isVerified: false, // Mark as not verified
+  });
+  const verificationUrl = `${process.env.PUBLIC_DOMAIN}/register/?token=${verificationToken}`;
+
+  sendSingleMail({
+    email,
+    subject: 'Email Verification',
+    text: ` Please use the link below to complete your account creation: ${verificationUrl}`,
+  });
+  res.status(200).json({
+    message: 'Verification email sent. Please check your inbox.',
+  });
+});
+
+// @description Verify token
+// @Route POST /api/users/verify-token
+// privacy Public
 const registerUser = asyncHandler(async (req, res) => {
-  const { firstName, lastName, email, phone, address, password } = req.body;
-  if (!firstName || !lastName || !email || !phone || !address || !password) {
+  const { firstName, lastName, phone, address, password } = req.body;
+  if (!firstName || !lastName || !phone || !address || !password) {
     res.status(400);
     throw new Error('Please add all field');
   }
+  const { token } = req.params;
 
-  // check if user exist
-  const userExist = await User.findOne({ email });
-  if (userExist) {
+  // Find the user with the token
+  const user = await User.findOne({ verificationToken: token });
+  if (!user) {
     res.status(400);
-    throw new Error('User already exist');
+    throw new Error('Invalid or expired token.');
   }
-  const user = await User.create({
-    firstName,
-    lastName,
-    email,
-    phone,
-    address,
-    password,
+
+  user.firstName = firstName;
+  user.lastName = lastName;
+  user.phone = phone;
+  user.address = address;
+  user.password = password;
+  user.isVerified = true;
+  user.verificationToken = null; // Clear the token
+  await user.save();
+  generateToken(res, user._id);
+
+  res.status(200);
+  res.json({
+    _id: user._id,
+    firstName: user.firstName,
+    lastName: user.lastName,
+    email: user.email,
+    phone: user.phone,
+    address: user.address,
+    isAdmin: user.isAdmin,
   });
-  if (user) {
-    res.status(200);
-    generateToken(res, user._id);
-    res.json({
-      _id: user._id,
-      firstName: user.firstName,
-      lastName: user.lastName,
-      email: user.email,
-      phone: user.phone,
-      address: user.address,
-      isAdmin: user.isAdmin,
-    });
-  } else {
-    res.status(500);
-    throw new Error('Something went wrong');
-  }
 });
 
 // @description This is to logout user
@@ -322,8 +374,9 @@ const resetPassword = asyncHandler(async (req, res) => {
 });
 
 export {
-  authUser,
+  verifyEmail,
   registerUser,
+  authUser,
   logoutUser,
   getUserProfile,
   updateUserProfile,

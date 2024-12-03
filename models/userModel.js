@@ -16,9 +16,28 @@ const userSchema = new mongoose.Schema(
       require: true,
       unique: true,
     },
+    isVerified: {
+      type: Boolean,
+      default: false,
+    },
+    verificationToken: {
+      type: String,
+      default: null,
+    },
     phone: {
       type: Number,
       require: true,
+    },
+    image: {
+      url: {
+        type: String,
+      },
+      publicId: {
+        type: String,
+      },
+    },
+    userType: {
+      type: String,
     },
     address: {
       type: String,
@@ -33,6 +52,7 @@ const userSchema = new mongoose.Schema(
       require: true,
       default: false,
     },
+
     resetPasswordToken: {
       type: String,
     },
