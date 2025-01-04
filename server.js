@@ -10,6 +10,7 @@ import productRoute from './routes/productRoutes.js';
 import orderRoute from './routes/orderRoutes.js';
 import dataRoute from './routes/dataRoutes.js';
 import transactionRoute from './routes/transactionRoutes.js';
+import contactRoute from './routes/contactRoutes.js';
 
 dotenv.config();
 const port = process.env.PORT || 5000;
@@ -32,6 +33,7 @@ app.use('/api/products', productRoute);
 app.use('/api/orders', orderRoute);
 app.use('/api/data', dataRoute);
 app.use('/api/transaction', transactionRoute);
+app.use('/api/contact', contactRoute);
 
 // Endpoint to verify payment
 app.post('/api/verify-payment', async (req, res) => {
